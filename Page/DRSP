@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>Регистратор переговоров</title>
+</head>
+<body>
+<center><b id="title"></b> <i id="time"></i></center>
+<center id ="b_top">
+<button class="buttons_top" onclick="req('prev')">Предыдущие</button>
+<button class="buttons_top" onclick="req('next')">Следующие</button>
+<button class="buttons_top" onclick="stop_sound()">Стоп</button>
+<input id="cont_play" type="checkbox"><span>Автопереход</span>
+</center>
+<center id ="ch_names">
+<div class="col1"></div>
+<div class="col2"></div>
+<div class="col1"></div>
+<div class="col2"></div>
+<div class="col1"></div>
+<div class="col2"></div>
+<div class="col1"></div>
+<div class="col2"></div>
+</center>
+<center id="records">
+<div class="col1"></div>
+<div class="col2"></div>
+<div class="col1"></div>
+<div class="col2"></div>
+<div class="col1"></div>
+<div class="col2"></div>
+<div class="col1"></div>
+<div class="col2"></div>
+</center>
+<div id="div2">
+</div>
+
+<script>
+'use strict;'
+const oki_steps =
+    [16,   17,   19,   21,   23,   25,   28, 31,   34,   37,   41,   45,   50,   55,
+	 60,   66,   73,   80,   88,   97,  107, 118,  130,  143,  157,  173,  190,  209,
+	230,  253,  279,  307,  337,  371,  408, 449,  494,  544,  598,  658,  724,  796,
+	876,  963, 1060, 1166, 1282, 1411, 1552];
+
+const step_changes = [ -1, -1, -1, -1, 2, 4, 6, 8 ];
+
+let context = new window.AudioContext;
+let x_rec = new XMLHttpRequest();
+let x_dir = new XMLHttpRequest();
+let gl_bufs = [];
+let source = [];
+let timer, cur_ind, tim;
+let stTime, ind, last, curD, curS, Dep;
+
+
+window.onload = function()
+{
+    x_dir.onload = show_dir;
+    x_dir.responseType = 'arraybuffer';
+    x_rec.onload = decode_data;
+    x_rec.responseType = 'arraybuffer';
+    
+    let xhr = new XMLHttpRequest();
+    xhr.open('GET', "/?prop__", true);
+    xhr.onload = set_prop;
+    xhr.send();
+
+    curD = 0;
+    stTime = 0;
+    cur_ind = 0;
+}
+
+function req(dir)
+{
+    x_dir.abort();
+    if ((Dep == 0) && (dir == "prev")) return;
+
+    let get_str = "/?d" + dir +"_" + String.fromCharCode((curD & 0xF) + 97, ((curD >> 4) & 0xF) + 97, 
+    ((curD >> 8) & 0xF) + 97, ((curD >> 12) & 0xF) + 97, ((curD >> 16) & 0xF) + 97,((curD >> 20) & 0xF) + 97,
+    ((curD >> 24) & 0xF) + 97, ((curD >> 28) & 0xF) + 97) + String.fromCharCode((Dep & 0xF) + 97, ((Dep >> 4) & 0xF) + 97, 
+    ((Dep >> 8) & 0xF) + 97, ((Dep >> 12) & 0xF) + 97, ((Dep >> 16) & 0xF) + 97,((Dep >> 20) & 0xF) + 97,
+    ((Dep >> 24) & 0xF) + 97, ((Dep >> 28) & 0xF) + 97);
+    
+    x_dir.open('GET', get_str, true);
+    x_dir.send();
+}
+
+function set_prop()
+{
+    if (this.status == 200) {
+        let prop = this.responseText.split('$'); // crit time ip mac chns station
+        let chn = document.getElementById('ch_names');
+        let i;
+        for (i = 0; i < 8; i++) chn.children[i].innerHTML = prop[11 + i];
+        document.getElementById('title').innerHTML = prop[19];
+        chn = document.getElementById('time');
+        i = new Date(1000*Number(prop[8]));
+        chn.innerHTML = i.toLocaleString("ru-RU", {hour12: false});
+        document.getElementById("b_top").hidden = false;
+        req("next");
+    }
+}
+
+function show_dir()
+{
+    if (this.status == 200) {
+        let buf = new Uint32Array(this.response);
+        let records = document.getElementById('records');
+        let t, i, tmp;
+        for(i = 0; i < 8; i++) {
+            t = records.children[i];
+            while (t.firstChild) t.removeChild(t.firstChild);
+        }
+        for(i = 0; i < (buf.length/2 - 1); i++) {
+            t = document.createElement('p');
+            t.className = "record";
+            t.onclick = play;
+            tmp = new Date(1000*buf[2*i]);
+            t.innerHTML = tmp.toLocaleString("ru-RU", {year: '2-digit', month: '2-digit', day: 'numeric'}) + ' ';
+            t.innerHTML += tmp.toLocaleString("ru-RU", {weekday: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false}).toUpperCase();
+            t.sector = buf[2*i + 1] & 0x1FFFFFFF;
+            t.time = 1000*buf[2*i];
+            records.children[buf[2*i + 1]>>>29].appendChild(t);
+        }
+        curD = buf[buf.length - 2];
+        Dep = buf[buf.length - 1];
+    }
+}
+
+function play(ev)
+{     // next sector only at end  
+    if (ev) {
+        //alert(ev);
+        clearInterval(timer);
+        x_rec.abort();
+        if (source[0]) source[0].stop();
+        if (source[1]) source[1].stop();
+
+        curS = ev.target.sector;
+        if (!curS) return;
+        tim = ev.target.time;
+        ind = 0; last = 0;
+        stTime = context.currentTime - 8.128;
+    }
+    let d = document.getElementById('time');
+    let i = new Date(tim);
+    d.innerText = i.toLocaleString("ru-RU", {hour12: false});
+    if (ev) tim -= 8128;
+    tim += 8128;
+    gl_bufs[cur_ind] = [];
+
+    let get_str = "/?rec___" + String.fromCharCode((curS & 0xF) + 97, ((curS >> 4) & 0xF) + 97, 
+    ((curS >> 8) & 0xF) + 97, ((curS >> 12) & 0xF) + 97, ((curS >> 16) & 0xF) + 97,((curS >> 20) & 0xF) + 97,
+    ((curS >> 24) & 0xF) + 97, ((curS >> 28) & 0xF) + 97)
+    
+    x_rec.open('GET', get_str, true);
+    x_rec.send();
+}
+
+function decode_data()
+{
+    let div = document.getElementById('div2');
+    if (this.status === 200) {
+        let buf = new Uint8Array(this.response);
+        let code, i, d, t;
+        let max = -0x800, min = 0x7ff;
+        for (i = 0; i < 2*buf.length - 8; i++) {
+            code = (buf[i >>> 1] >>> (4 * ((i + 1) & 1))) & 0xF;
+            d = oki_steps[ind]*((code>>>2) & 1) + (oki_steps[ind]>>>1)*((code>>>1) & 1) + (oki_steps[ind]>>>2)*(code & 1) + (oki_steps[ind]>>>3);
+            if (code & 8) d = -d;
+            d += last;
+            if (d < -0x800) d = -0x800;
+            if (d > 0x7ff) d = 0x7ff;
+            last = d;
+            gl_bufs[cur_ind].push(d / 0x800);
+            if (last < min) min = last;
+            if (last > max) max = last;
+            ind += step_changes[code & 7];
+            if (ind < 0) ind = 0;
+            if (ind > 48) ind = 48;
+        }
+        curS = (buf[buf.length - 1]<<24) |  (buf[buf.length - 2]<<16) | (buf[buf.length - 3]<<8) | buf[buf.length - 4];
+
+        t = context.currentTime;
+        if(gl_bufs[cur_ind].length >= 65024 || (curS == 0)) {
+            let outbuf = context.createBuffer(1, gl_bufs[cur_ind].length, 8000);
+            outbuf.copyToChannel(new Float32Array(gl_bufs[cur_ind]), 0);
+            source[cur_ind] = context.createBufferSource();
+            source[cur_ind].buffer = outbuf;
+            source[cur_ind].connect(context.destination);
+
+            stTime = stTime + 8.128;
+            //stTime = stTime + 16.256;
+            if (stTime < t) {
+                stTime = t + 0.01;
+                d = 10;
+            }
+            else d = 1000*(stTime - t) + 10;
+            source[cur_ind].start(stTime);
+            if (curS != 0) timer = setTimeout(play, d, 0);
+            else {
+                //t = gl_bufs[cur_ind].length/8;
+               //timer = setTimeout(function() {document.getElementById('time').innerText = ""}, d + t);
+            }
+            cur_ind = 1 - cur_ind;
+        }
+        else {
+            let get_str = "/?rec___" + String.fromCharCode((curS & 0xF) + 97, ((curS >> 4) & 0xF) + 97, 
+            ((curS >> 8) & 0xF) + 97, ((curS >> 12) & 0xF) + 97, ((curS >> 16) & 0xF) + 97,((curS >> 20) & 0xF) + 97,
+            ((curS >> 24) & 0xF) + 97, ((curS >> 28) & 0xF) + 97)
+            x_rec.open('GET', get_str, true);
+            x_rec.send();
+        }
+        div.innerHTML = div.innerHTML + "<p>Receive: " + context.currentTime.toFixed(3) +
+        "  Min: " + min.toFixed(1) + "  Max: " + max.toFixed(1) + "  Buf: " + (8.128 + stTime - t).toFixed(2) + "</p>";
+    }
+    else div.innerHTML = div.innerHTML + "<p>Error: " + this.status + "</p>";
+}
+
+function stop_sound() 
+{
+    clearInterval(timer);
+    x_rec.abort();
+    if (source[0]) source[0].stop();
+    if (source[1]) source[1].stop();
+    //document.getElementById('time').innerText = "";
+}
+
+</script>
+
+<style>
+    
+body {
+    cursor:default;
+    color: black;
+    background-color:rgb(211, 210, 210);
+}
+
+.buttons_top {
+    margin: .2% 10%;
+}
+.col1 {
+    display: inline-block;
+    vertical-align: top;
+    width: 12%;
+    background-color: rgb(140, 189, 153);
+}
+
+.col2 {
+    display: inline-block;
+    vertical-align: top;
+    width: 12%;
+    background-color: rgb(145, 190, 190);
+}
+
+.record:hover {
+    color:blue;    
+}
+
+.record:active, hover {
+    color:black;
+}
+
+</style>
+</body>
+</html>

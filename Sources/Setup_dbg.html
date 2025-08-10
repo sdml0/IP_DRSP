@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>Setup</title>
+</head>
+<body>
+<p>Пароль <input id="pass" type="password" value="R4*@g2k!">
+<b id="res"></b></p>
+<p>Время: <span id="time"></span>
+<button onclick="set_time()">Синхронизировать</button></p>
+
+<p>Названия:</p>
+<p><input id="st_name" type="text"></p>
+<p id="0"><input type="text"> 1 канал <input type="number" min=0 max=100></p>
+<p id="1"><input type="text"> 2 канал <input type="number" min=0 max=100></p>
+<p id="2"><input type="text"> 3 канал <input type="number" min=0 max=100></p>
+<p id="3"><input type="text"> 4 канал <input type="number" min=0 max=100></p>
+<p id="4"><input type="text"> 5 канал <input type="number" min=0 max=100></p>
+<p id="5"><input type="text"> 6 канал <input type="number" min=0 max=100></p>
+<p id="6"><input type="text"> 7 канал <input type="number" min=0 max=100></p>
+<p id="7"><input type="text"> 8 канал <input type="number" min=0 max=100></p>
+<button onclick="set_names()">Установить названия</button> <button onclick="set_thr()">Установить пороги</button><br>
+<p>IP-адрес <input id = "IP" pattern="((25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(25[0-5]|2[0-4]\d|[01]?\d\d?)"><span></span>
+<button onclick="set_ip()">Установить</button></p>
+<p>MAC-адрес <input id="MAC" pattern="([0-9a-fA-F]{2}([:-]|$)){6}$|([0-9a-fA-F]{4}([.]|$)){3}"><span></span>
+<button onclick="set_mac()">Установить</button></p>
+<p id="stat"></p>
+<div id="fw_up" hidden=true>
+<button onclick="reboot()">Перезагрузить</button><br><br>
+<input id="file" type="file">
+<button onclick="upload_fw1()">Upload FW</button>
+</div>
+
+<script>
+'use strict;'
+let tim;
+       
+window.onload = function()
+{
+    let xhr = new XMLHttpRequest();
+    xhr.open('GET', "http://192.168.1.222/?prop__", true);
+    xhr.onload = show_prop;
+    xhr.send();
+}
+
+function show_prop()
+{
+    if (this.status == 200) {
+        let prop = this.responseText.split('$');
+        let p = document.getElementById('st_name');
+        p.value = prop[19];
+        let i;
+        for(i = 0; i < 8; i++) {
+            p = document.getElementById(i);
+            p.children[0].value = prop[11 + i];
+            p.children[1].value = Number(prop[i]);
+        }
+        i = new Date(1000*Number(prop[8]));
+        p = document.getElementById('time');
+        p.innerText = i.toLocaleString("ru-RU", {hour12: false});
+        p = document.getElementById('IP');
+        p.value = prop[9];
+        p = document.getElementById('MAC');
+        p.value = prop[10];
+        p = document.getElementById('stat');
+        p.innerText = 'F: ' + prop[21] + '; S: ' + prop[20] + ';';
+    }
+}
+
+function set_names()
+{
+    let prop = [];
+    let i, p;
+    for(i = 0; i < 8; i++) {
+        p = document.getElementById(i);
+        prop[i] = p.children[0].value;
+    }
+    prop[8] = document.getElementById('st_name').value;
+    prop = prop.join('$');
+    if (prop.length > 255) {
+        p = document.getElementById("res");
+        p.innerText = "Превышен лимит длины названий";
+        return;
+    }
+    p = document.getElementById("pass").value;
+    p = "http://192.168.1.222/?names" + p;
+    let xhr = new XMLHttpRequest();
+    xhr.open('POST', p, true);
+    xhr.onload = show_res;
+    xhr.send(prop);
+}
+
+function set_thr()
+{
+    let thr = [];
+    let p = document.getElementById("pass").value;
+    p = "http://192.168.1.222/?thresh" + p;
+    for(let i = 0; i < 8; i++) {
+        thr[i] = document.getElementById(i).children[1].value;        
+        p += String.fromCharCode((thr[i] & 0xF) + 97, ((thr[i] >> 4) & 0xF) + 97);
+    }
+    let xhr = new XMLHttpRequest();
+    xhr.open('GET', p, true);
+    xhr.onload = show_res;
+    xhr.send();
+}
+
+function set_time()
+{
+    let d = new Date();
+    d = d.getTime()/1000;
+    d = d.toFixed();
+    let p = document.getElementById("pass").value;
+    p = "http://192.168.1.222/?time__" + p + String.fromCharCode((d & 0xF) + 97, ((d >> 4) & 0xF) + 97, 
+    ((d >> 8) & 0xF) + 97, ((d >> 12) & 0xF) + 97, ((d >> 16) & 0xF) + 97,((d >> 20) & 0xF) + 97,
+    ((d >> 24) & 0xF) + 97, ((d >> 28) & 0xF) + 97);
+    let xhr = new XMLHttpRequest();
+    xhr.open('GET', p, true);
+    xhr.onload = show_res;
+    xhr.send();
+
+}
+
+function set_ip()
+{
+    let ip = document.getElementById("IP").value;
+    ip = ip.split(".");
+    ip[0] = Number(ip[0]);
+    ip[1] = Number(ip[1]);
+    ip[2] = Number(ip[2]);
+    ip[3] = Number(ip[3]);
+    ip = ip[0] | (ip[1]<<8) | (ip[2]<<16) | (ip[3]<<24);
+    if(ip && (ip < 0xFFFFFFFF)) {
+        let p = document.getElementById("pass").value;
+        p = "http://192.168.1.222/?setip_" + p + String.fromCharCode((ip & 0xF) + 97, ((ip >> 4) & 0xF) + 97, 
+        ((ip >> 8) & 0xF) + 97, ((ip >> 12) & 0xF) + 97, ((ip >> 16) & 0xF) + 97,((ip >> 20) & 0xF) + 97,
+        ((ip >> 24) & 0xF) + 97, ((ip >> 28) & 0xF) + 97);
+        let xhr = new XMLHttpRequest();
+        xhr.open('GET', p, true);
+        xhr.onload = show_res;
+        xhr.send();
+    }
+}
+
+function set_mac()
+{
+    let mac = document.getElementById("MAC");
+    if (mac.value == "showall") {
+        mac.value = "";
+        document.getElementById("fw_up").hidden = false;
+        return;
+    }
+    mac = mac.value.split(':');
+    mac[0] = parseInt(mac[0], 16);
+    mac[1] = parseInt(mac[1], 16);
+    mac[2] = parseInt(mac[2], 16);
+    mac[3] = parseInt(mac[3], 16);
+    mac[4] = parseInt(mac[4], 16);
+    mac[5] = parseInt(mac[5], 16);
+    if(mac[0] + mac[1] + mac[2] + mac[3] + mac[4] + mac[5]) {
+        let p = document.getElementById("pass").value;
+        p = "http://192.168.1.222/?setmac" + p;
+        for(let i = 0; i < 6; i++) p += String.fromCharCode((mac[i] & 0xF) + 97, ((mac[i] >> 4) & 0xF) + 97);
+        let xhr = new XMLHttpRequest();
+        xhr.open('GET', p, true);
+        xhr.onload = show_res;
+        xhr.send();
+    }
+}
+
+function reboot()
+{
+    let p = document.getElementById("pass").value;
+    let xhr = new XMLHttpRequest();
+    xhr.open('GET', "http://192.168.1.222/?reboot" + p, true);
+    xhr.onload = show_res;
+    xhr.send();
+}
+
+function upload_fw1()
+{
+    let fl = document.getElementById("file");
+    fl = fl.files[0];
+    if (!fl || (fl.size > 18432)) return;
+    let xhr = new XMLHttpRequest();
+    xhr.open('POST', "http://192.168.1.222/?fw_up", true);
+    xhr.onload = show_res;
+    xhr.send(fl); 
+}
+
+function show_res()
+{
+    let d = document.getElementById("res");
+    if (this.status == 200) d.innerText = " OK";
+    else d.innerText = " Неудачно";
+}
+
+</script>
+<style>
+input + span {
+    padding-right: 30px;
+  }
+  
+input:invalid+span:after {
+    position: absolute; content: '✖';
+    color: red;
+    padding-left: 5px;
+  }
+  
+input:valid+span:after {
+    position: absolute;
+    content: '✓';
+    color: green;
+    padding-left: 5px;
+  }
+</style>
+</body>
+</html>

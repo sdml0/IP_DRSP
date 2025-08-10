@@ -1,0 +1,15 @@
+*.zip
+*.hex
+*.bin
+*.uvguix.*
+JLink*.*
+*.exe
+*.bat
+EventRecorderStub.scvd
+DRSP.bin
+DebugConfig
+Listings
+Objects
+PCB
+
+

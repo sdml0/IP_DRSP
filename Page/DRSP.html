@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>Регистратор переговоров</title>
+</head>
+<body>
+<center><b id="title"></b> <i id="time"></i></center>
+<center id ="b_top" hidden=true>
+<button class="buttons_top" onclick="req('prev')">Предыдущие</button>
+<button class="buttons_top" onclick="req('next')">Следующие</button>
+<button class="buttons_top" onclick="stop_sound()">Стоп</button>
+<input id="cont_play" type="checkbox"><label for="cont_play">Автопереход</label>
+</center>
+<center id ="ch_names">
+<div class="col1"></div>
+<div class="col2"></div>
+<div class="col1"></div>
+<div class="col2"></div>
+<div class="col1"></div>
+<div class="col2"></div>
+<div class="col1"></div>
+<div class="col2"></div>
+</center>
+<center id="records">
+<div class="col1"></div>
+<div class="col2"></div>
+<div class="col1"></div>
+<div class="col2"></div>
+<div class="col1"></div>
+<div class="col2"></div>
+<div class="col1"></div>
+<div class="col2"></div>
+</center>
+
+<script>
+'use strict;'
+const oki_steps =
+    [16,   17,   19,   21,   23,   25,   28, 31,   34,   37,   41,   45,   50,   55,
+	 60,   66,   73,   80,   88,   97,  107, 118,  130,  143,  157,  173,  190,  209,
+	230,  253,  279,  307,  337,  371,  408, 449,  494,  544,  598,  658,  724,  796,
+	876,  963, 1060, 1166, 1282, 1411, 1552];
+
+const step_changes = [ -1, -1, -1, -1, 2, 4, 6, 8 ];
+
+let context = new window.AudioContext;
+let x_rec = new XMLHttpRequest();
+let x_dir = new XMLHttpRequest();
+let gl_bufs = [], source = [], play_seq = [];
+let timer1, g_ind = 0, tim, p_ind = 0;
+let stTime = 0, ind, last, curD = 0, curS, Dep;
+
+
+window.onload = function()
+{
+    x_dir.onload = show_dir;
+    x_dir.responseType = 'arraybuffer';
+    x_rec.onload = decode_data;
+    x_rec.responseType = 'arraybuffer';
+    
+    let xhr = new XMLHttpRequest();
+    xhr.open('GET', "http://192.168.1.222/?prop__", true);
+    xhr.onload = set_prop;
+    xhr.send();
+}
+
+function set_prop()
+{
+    if (this.status == 200) {
+        let prop = this.responseText.split('$');
+        let chn = document.getElementById('ch_names');
+        let i;
+        for (i = 0; i < 8; i++) chn.children[i].innerText = prop[11 + i];
+        document.getElementById('title').innerText = prop[19];
+        chn = document.getElementById('time');
+        i = new Date(1000*Number(prop[8]));
+        chn.innerText = i.toLocaleString("ru-RU", {hour12: false});
+        document.getElementById("b_top").hidden = false;
+        req("next");
+    }
+}
+
+function req(dir)
+{
+    //x_dir.abort();
+    if ((Dep == 0) && (dir == "prev")) return;
+    if (play_seq[p_ind] && document.getElementById("cont_play").checked && (dir != "auto")) return;
+    if (dir == 'auto') dir = 'next';
+
+    let get_str = "http://192.168.1.222/?d" + dir +"_" + String.fromCharCode((curD & 0xF) + 97, ((curD >> 4) & 0xF) + 97, 
+    ((curD >> 8) & 0xF) + 97, ((curD >> 12) & 0xF) + 97, ((curD >> 16) & 0xF) + 97,((curD >> 20) & 0xF) + 97,
+    ((curD >> 24) & 0xF) + 97, ((curD >> 28) & 0xF) + 97) + String.fromCharCode((Dep & 0xF) + 97, ((Dep >> 4) & 0xF) + 97, 
+    ((Dep >> 8) & 0xF) + 97, ((Dep >> 12) & 0xF) + 97, ((Dep >> 16) & 0xF) + 97,((Dep >> 20) & 0xF) + 97,
+    ((Dep >> 24) & 0xF) + 97, ((Dep >> 28) & 0xF) + 97);
+    
+    x_dir.open('GET', get_str, true);
+    x_dir.send();
+}
+
+function show_dir()
+{
+    if (this.status == 200) {
+        let buf = new Uint32Array(this.response);
+        let records = document.getElementById('records');
+        let t, i, tmp;
+        for(i = 0; i < 8; i++) {
+                t = records.children[i];
+                while (t.firstChild) t.removeChild(t.firstChild);
+            }
+        for(i = 0; i < (buf.length/2 - 1); i++) {
+            t = document.createElement('p');
+            t.className = "record";
+            t.onclick = play;
+            t.sector = buf[2*i + 1] & 0x1FFFFFFF;
+            t.time = 1000*buf[2*i];
+            t.channel = buf[2*i + 1]>>>29;
+            records.children[t.channel].appendChild(t);
+            show_date(t, 0);
+        }
+        if (play_seq[1 - p_ind] && document.getElementById("cont_play").checked) {
+            if (curD != buf[buf.length - 2]) {
+                if (records.children[play_seq[1 - p_ind].channel].firstChild) {
+                    play_seq[p_ind] = records.children[play_seq[1 - p_ind].channel].firstChild;
+                    timer1 = setTimeout(play, i, 10);
+                }
+                else {
+                    curD = buf[buf.length - 2];
+                    req("auto");
+                }
+            }
+            else {
+                //show_date(play_seq[1 - p_ind], 0);
+                play_seq[1 - p_ind] = 0;
+            }
+        }
+        curD = buf[buf.length - 2];
+        Dep = buf[buf.length - 1];
+    }
+}
+
+function play(ev)
+{
+    if (ev) {
+        if(ev.target) {
+            clearInterval(timer1);
+            x_rec.abort();
+            if (play_seq[p_ind]) show_date(play_seq[p_ind], 0);
+            if (source[0]) source[0].stop();
+            if (source[1]) source[1].stop();
+            play_seq[p_ind] = ev.target;
+            stTime = 0;
+        }
+        if (play_seq[1 - p_ind]) show_date(play_seq[1 - p_ind], 0);
+        play_seq[1 - p_ind] = 0;
+        play_seq[p_ind].classList.add("playing");
+        tim = play_seq[p_ind].time;
+        curS = play_seq[p_ind].sector;
+        if (!curS) return;
+        ind = 0; last = 0;
+    }
+    else {
+        show_date(play_seq[p_ind], tim);
+        tim += 8128;
+    }
+    gl_bufs[g_ind] = [];
+
+    let get_str = "http://192.168.1.222/?rec___" + String.fromCharCode((curS & 0xF) + 97, ((curS >> 4) & 0xF) + 97, 
+    ((curS >> 8) & 0xF) + 97, ((curS >> 12) & 0xF) + 97, ((curS >> 16) & 0xF) + 97,((curS >> 20) & 0xF) + 97,
+    ((curS >> 24) & 0xF) + 97, ((curS >> 28) & 0xF) + 97)
+    
+    x_rec.open('GET', get_str, true);
+    x_rec.send();
+}
+
+function decode_data()
+{
+    if (this.status === 200) {
+        let buf = new Uint8Array(this.response);
+        let code, i, d, t;
+        let max = -0x800, min = 0x7ff;
+        for (i = 0; i < 2*buf.length - 8; i++) {
+            code = (buf[i >>> 1] >>> (4 * ((i + 1) & 1))) & 0xF;
+            d = oki_steps[ind]*((code>>>2) & 1) + (oki_steps[ind]>>>1)*((code>>>1) & 1) + (oki_steps[ind]>>>2)*(code & 1) + (oki_steps[ind]>>>3);
+            if (code & 8) d = -d;
+            d += last;
+            if (d < -0x800) d = -0x800;     // try rem
+            if (d > 0x7ff) d = 0x7ff;
+            last = d;
+            gl_bufs[g_ind].push(d / 0x800);
+            if (last < min) min = last;         // rem later
+            if (last > max) max = last;
+            ind += step_changes[code & 7];
+            if (ind < 0) ind = 0;
+            if (ind > 48) ind = 48;
+        }
+        curS = (buf[buf.length - 1]<<24) |  (buf[buf.length - 2]<<16) | (buf[buf.length - 3]<<8) | buf[buf.length - 4];
+
+        t = context.currentTime;
+        if(gl_bufs[g_ind].length >= 65024 || (curS == 0)) {
+            let outbuf = context.createBuffer(1, gl_bufs[g_ind].length, 8000);
+            outbuf.copyToChannel(new Float32Array(gl_bufs[g_ind]), 0);
+            source[g_ind] = context.createBufferSource();
+            source[g_ind].buffer = outbuf;
+            source[g_ind].connect(context.destination);
+            if (stTime < t) {
+                stTime = t + 0.1;
+                code = 0;
+            }
+            else code = 1000*(stTime - t);
+            source[g_ind].start(stTime);
+            d = gl_bufs[g_ind].length/8;
+            stTime += d/1000;
+            if (curS != 0) timer1 = setTimeout(play, code + 10, 0);
+            else {
+                p_ind = 1 - p_ind;
+                if (document.getElementById("cont_play").checked) {
+                    if (play_seq[1 - p_ind].nextSibling) {
+                        play_seq[p_ind] = play_seq[1 - p_ind].nextSibling;
+                        timer1 = setTimeout(play, d + code, 1);
+                    }
+                    else timer1 = setTimeout(req, d + code, "auto");
+                }
+                else timer1 = setTimeout(switch_date, d + code);
+            }
+            g_ind = 1 - g_ind;
+        }
+        else {
+            let get_str = "http://192.168.1.222/?rec___" + String.fromCharCode((curS & 0xF) + 97, ((curS >> 4) & 0xF) + 97, 
+            ((curS >> 8) & 0xF) + 97, ((curS >> 12) & 0xF) + 97, ((curS >> 16) & 0xF) + 97,((curS >> 20) & 0xF) + 97,
+            ((curS >> 24) & 0xF) + 97, ((curS >> 28) & 0xF) + 97)
+            x_rec.open('GET', get_str, true);
+            x_rec.send();
+        }
+        console.log("Receive: " + context.currentTime.toFixed(3) +
+        "  Min: " + min.toFixed(1) + "  Max: " + max.toFixed(1) + "  Buf: " + (8.128 + stTime - t).toFixed(2));
+    }
+    else console.log("Error: " + this.status);
+}
+
+function show_date(cell, tm) 
+{
+    if (!tm) {
+        tm = cell.time;
+        cell.classList.remove("playing");
+    }
+    let t = new Date(tm);
+    cell.innerText = t.toLocaleString("ru-RU", {year: '2-digit', month: '2-digit', day: 'numeric'}) + ' ';
+    cell.innerText += t.toLocaleString("ru-RU", {weekday: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false}).toUpperCase();
+}
+
+function switch_date()
+{
+    show_date(play_seq[1 - p_ind], 0);
+    play_seq[1 - p_ind] = 0;
+}
+
+function stop_sound() 
+{
+    clearInterval(timer1);
+    x_rec.abort();
+    if (play_seq[0]) {
+        show_date(play_seq[0], 0);
+        play_seq[0] = 0;
+    }
+    if (play_seq[1]) {
+        show_date(play_seq[1], 0);
+        play_seq[1] = 0;
+    }
+    if (source[0]) source[0].stop();
+    if (source[1]) source[1].stop();
+}
+
+</script>
+
+<style>
+    
+body {
+    cursor:default;
+    color: black;
+    background-color:rgb(211, 210, 210);
+}
+
+.buttons_top {
+    margin: .2% 10%;
+}
+.col1 {
+    display: inline-block;
+    vertical-align: top;
+    width: 12%;
+    background-color: rgb(140, 189, 153);
+}
+
+.col2 {
+    display: inline-block;
+    vertical-align: top;
+    width: 12%;
+    background-color: rgb(145, 190, 190);
+}
+
+#ch_names div {
+    border-bottom: 2px solid black;
+    margin-bottom: 1px;
+    padding-bottom: 0.1%;
+    font-weight: bold;
+}
+
+.record:hover {
+    color:blue;    
+}
+
+.record:active, hover {
+    color:black;
+}
+
+.playing {
+    font-weight: bold;
+    border: 2px solid red;
+
+}
+
+</style>
+</body>
+</html>

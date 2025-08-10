@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>Sound Send</title>
+</head>
+<body>
+<center><p>Sound Send</p>
+
+<button onclick="req()">Запрос</button>
+
+<input id="file" type="file"/>
+<button onclick="send()">Отправить</button>
+
+</center>
+<div id="div" onclick="play(event)">
+</div>
+
+<div id="div2">
+</div>
+
+<script>
+'use strict;'
+const oki_steps =
+    [16,   17,   19,   21,   23,   25,   28, 31,   34,   37,   41,   45,   50,   55,
+	 60,   66,   73,   80,   88,   97,  107, 118,  130,  143,  157,  173,  190,  209,
+	230,  253,  279,  307,  337,  371,  408, 449,  494,  544,  598,  658,  724,  796,
+	876,  963, 1060, 1166, 1282, 1411, 1552];
+
+const step_changes = [ -1, -1, -1, -1, 2, 4, 6, 8 ];
+
+let context = new window.AudioContext;
+let stTime = 0, ind, last, cnt, targ;
+
+function req() {
+    let xmlhttp = new XMLHttpRequest();
+    xmlhttp.open('GET', "/listin", true);
+    xmlhttp.onload = function() {
+        if (this.status == 200) {
+            let div = document.getElementById('div');
+            div.innerHTML = this.responseText;
+        }
+    }
+    xmlhttp.send();
+}
+
+function play(ev) {
+    if (ev) {
+        targ = ev.target.innerHTML + "@";
+        ind = 0; last = 0; cnt = 0;
+    }
+    let xmlhttp = new XMLHttpRequest();
+    let t = targ + String.fromCharCode(((cnt >> 12) & 0xF) + 97) + String.fromCharCode(((cnt >> 8) & 0xF) + 97) + String.fromCharCode(((cnt >> 4) & 0xF) + 97) + String.fromCharCode((cnt & 0xF) + 97);
+    xmlhttp.open('GET', t, true);
+    xmlhttp.responseType = 'arraybuffer';
+    xmlhttp.onload = function () {
+        let div = document.getElementById('div2');
+        if (this.status === 200) {
+            let buf = new Uint8Array(this.response);
+            let outbuf = context.createBuffer(1, 2 * buf.length, 8000);
+            let ob = outbuf.getChannelData(0);
+            let code, i, d, t;
+            for (i = 0; i < 2 * buf.length; i++) {
+                code = (buf[i >> 1] >> (4 * ((i + 1) & 1))) & 0xF;
+                d = oki_steps[ind] * ((code & 4) >> 2) + (oki_steps[ind] >> 1) * ((code & 2) >> 1) + (oki_steps[ind] >> 2) * (code & 1) + (oki_steps[ind] >> 3);
+                if (code & 8) d = -d;
+                d += last;
+                if (d < -0x800) d = -0x800;
+                if (d > 0x7ff) d = 0x7ff;
+                last = d;
+                ob[i] = d / 0x800;
+                ind += step_changes[code & 7];
+                if (ind < 0) ind = 0;
+                if (ind > 48) ind = 48;
+            }
+            let source = context.createBufferSource();
+            source.buffer = outbuf;
+            source.connect(context.destination);
+            stTime = stTime + 2.048;
+            t = context.currentTime;
+            if (stTime < t) stTime = t + 4.096;
+            source.start(stTime);
+            cnt++;
+            t = stTime - t;
+            if (t > 20) d = 2048;
+            else d = 0;
+            if (buf.length === 8192) setTimeout(play, d, 0);
+            div.innerHTML = div.innerHTML + "<p>Receive:" + context.currentTime.toFixed(3) + "   Delay:" + d.toFixed(1)+ "   Buf:" + t.toFixed(1) + "</p>";
+        }
+        else div.innerHTML = div.innerHTML + "<p>Error: " + this.status + "</p>";
+    }
+    xmlhttp.send();
+    //let div = document.getElementById('div2');
+    //div.innerHTML = div.innerHTML + "<p>Send:" + context.currentTime.toFixed(3) + "</p>";
+}
+function send() {
+    let fl=document.getElementById("file");
+    fl=fl.files[0];
+    if (!fl) return;
+    let xmlhttp = new XMLHttpRequest();
+    xmlhttp.open('POST','',true);
+    xmlhttp.send(fl); 
+}
+</script>
+
+<style>
+body {
+color: black;
+}
+
+</style>
+</body>
+</html>
